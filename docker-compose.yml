@@ -1,0 +1,102 @@
+# Full stack for a one-command demo:  docker compose up --build
+#
+# For day-to-day development, run only the infrastructure and start the app
+# from your IDE (it defaults to localhost):
+#
+#   docker compose up postgres kafka
+#
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      # The default 'postgres' superuser is for admin/maintenance only. It owns the
+      # dedicated application database below; the app connects as the least-privilege
+      # 'fraud_app' role created by ./docker/initdb (see that script).
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fraud_rule_engine
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Runs once on first init (empty data volume) to create the app role + grants.
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fraud_rule_engine"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  kafka:
+    image: apache/kafka:3.9.1
+    ports:
+      # Host-facing listener (IDE / curl on the host connect here).
+      - "9094:9094"
+    environment:
+      # Single-node KRaft: this broker is also the controller.
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Two client listeners: INTERNAL for other containers, EXTERNAL for the host.
+      # This advertised-listeners split is the one Kafka-in-Docker gotcha.
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      # Single-node settings.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Kafka browser for demos (topics, consumer-group lag, the dead-letter topic).
+  # Opt-in via the "demo" profile so the core stack stays lean:
+  #
+  #   docker compose --profile demo up --build
+  #
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:v1.5.0
+    profiles: ["demo"]
+    ports:
+      - "8088:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "false"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  fraud-engine:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/fraud_rule_engine
+      SPRING_DATASOURCE_USERNAME: fraud_app
+      SPRING_DATASOURCE_PASSWORD: fraud
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # Emit one JSON object per log line (ECS schema), including the traceId/spanId that
+      # Micrometer Tracing puts in the MDC, so containerised logs are machine-parseable
+      # for aggregation (ADR-0006). Running from the IDE stays human-readable — this is
+      # only switched on in the container.
+      LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
+      # The HIGH_RISK_COUNTRY rule ships disabled-in-practice (empty list) so the app
+      # makes no geopolitical judgement by default. The demo stack populates a small
+      # sample list — the FATF "call for action" jurisdictions — so the geographic
+      # corroboration scenario in demo.sh has something to fire on. Operations, not code.
+      FRAUD_RULES_HIGH_RISK_COUNTRY_COUNTRIES: IR,KP,MM
+
+volumes:
+  postgres-data:

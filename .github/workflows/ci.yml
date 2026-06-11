@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref so a fresh push doesn't queue behind a stale one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Temurin 25 matches the project's java.version and the Dockerfile base image.
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: maven
+
+      # GitHub-hosted ubuntu runners ship a running Docker daemon, so the Testcontainers
+      # integration tests (Postgres + Kafka) run unchanged — no service containers needed.
+      - name: Build and test
+        run: ./mvnw -B -ntp verify
+
+  docker-image:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image build runs the Maven build internally (-DskipTests); this guards the
+      # multi-stage Dockerfile itself, which the test job above doesn't exercise.
+      - name: Build image
+        run: docker build -t fraud-rule-engine .

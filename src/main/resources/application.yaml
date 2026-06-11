@@ -1,0 +1,134 @@
+spring:
+  application:
+    name: fraud-rule-engine
+
+  # Connection details default to localhost so the app runs straight from the IDE
+  # against `docker compose up postgres kafka`. In the full compose stack these are
+  # overridden by environment variables (see docker-compose.yml).
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fraud_rule_engine}
+    username: ${SPRING_DATASOURCE_USERNAME:fraud_app}
+    password: ${SPRING_DATASOURCE_PASSWORD:fraud}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema; Hibernate only validates that entities match it.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9094}
+    consumer:
+      group-id: ${SPRING_KAFKA_CONSUMER_GROUP_ID:fraud-rule-engine}
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # ErrorHandlingDeserializer wraps the Jackson 3 JSON deserializer, so malformed JSON
+      # surfaces as a DeserializationException for the error handler to dead-letter instead
+      # of killing the container in an endless redelivery loop (ADR-0004).
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JacksonJsonDeserializer
+        spring.json.value.default.type: com.capitech.fraud.messaging.TransactionEventMessage
+        # External producers publish plain JSON without Spring's type headers.
+        spring.json.use.type.headers: false
+    producer:
+      # Plain strings suffice here; the DLT recoverer overrides the value serializer per
+      # failure type (see KafkaConsumerConfig).
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    listener:
+      # Observe each consumed record so a Kafka-ingested event's logs carry a trace id
+      # for end-to-end correlation.
+      observation-enabled: true
+
+# Rule engine tuning (see ADR-0002/ADR-0003, com.capitech.fraud.rule.RuleProperties).
+# An evaluation is flagged once the summed rule score reaches flag-threshold. Each rule
+# can be disabled and re-weighted via env vars — tuning is operations, not a deploy.
+#
+# Kafka ingestion (ADR-0004): the consumer is the primary ingestion path; un-processable
+# messages are routed to "${transactions-topic}-dlt" (Spring Kafka's default DLT name).
+fraud:
+  kafka:
+    transactions-topic: ${FRAUD_KAFKA_TRANSACTIONS_TOPIC:transactions}
+  rules:
+    flag-threshold: ${FRAUD_RULES_FLAG_THRESHOLD:50}
+    amount-threshold:
+      enabled: ${FRAUD_RULES_AMOUNT_THRESHOLD_ENABLED:true}
+      limit: ${FRAUD_RULES_AMOUNT_THRESHOLD_LIMIT:10000}
+      score: ${FRAUD_RULES_AMOUNT_THRESHOLD_SCORE:50}
+    velocity:
+      enabled: ${FRAUD_RULES_VELOCITY_ENABLED:true}
+      max-events: ${FRAUD_RULES_VELOCITY_MAX_EVENTS:3}
+      window: ${FRAUD_RULES_VELOCITY_WINDOW:10m}
+      score: ${FRAUD_RULES_VELOCITY_SCORE:30}
+    cumulative-amount:
+      enabled: ${FRAUD_RULES_CUMULATIVE_AMOUNT_ENABLED:true}
+      limit: ${FRAUD_RULES_CUMULATIVE_AMOUNT_LIMIT:50000}
+      window: ${FRAUD_RULES_CUMULATIVE_AMOUNT_WINDOW:1h}
+      score: ${FRAUD_RULES_CUMULATIVE_AMOUNT_SCORE:35}
+    card-testing:
+      enabled: ${FRAUD_RULES_CARD_TESTING_ENABLED:true}
+      micro-amount: ${FRAUD_RULES_CARD_TESTING_MICRO_AMOUNT:50}
+      min-count: ${FRAUD_RULES_CARD_TESTING_MIN_COUNT:5}
+      window: ${FRAUD_RULES_CARD_TESTING_WINDOW:10m}
+      score: ${FRAUD_RULES_CARD_TESTING_SCORE:45}
+    duplicate-transaction:
+      enabled: ${FRAUD_RULES_DUPLICATE_TRANSACTION_ENABLED:true}
+      window: ${FRAUD_RULES_DUPLICATE_TRANSACTION_WINDOW:5m}
+      score: ${FRAUD_RULES_DUPLICATE_TRANSACTION_SCORE:40}
+    odd-hours:
+      enabled: ${FRAUD_RULES_ODD_HOURS_ENABLED:true}
+      zone: ${FRAUD_RULES_ODD_HOURS_ZONE:Africa/Johannesburg}
+      night-start: "${FRAUD_RULES_ODD_HOURS_NIGHT_START:00:00}"
+      night-end: "${FRAUD_RULES_ODD_HOURS_NIGHT_END:04:30}"
+      score: ${FRAUD_RULES_ODD_HOURS_SCORE:20}
+    impossible-travel:
+      enabled: ${FRAUD_RULES_IMPOSSIBLE_TRAVEL_ENABLED:true}
+      min-gap: ${FRAUD_RULES_IMPOSSIBLE_TRAVEL_MIN_GAP:4h}
+      score: ${FRAUD_RULES_IMPOSSIBLE_TRAVEL_SCORE:40}
+    high-risk-country:
+      enabled: ${FRAUD_RULES_HIGH_RISK_COUNTRY_ENABLED:true}
+      # Empty by default — populate with comma-separated ISO codes (e.g. the FATF list).
+      countries: ${FRAUD_RULES_HIGH_RISK_COUNTRY_COUNTRIES:}
+      score: ${FRAUD_RULES_HIGH_RISK_COUNTRY_SCORE:15}
+    # ML anomaly scorer (ADR-0006): an Isolation Forest fitted at startup on synthetic
+    # "normal" data, run in shadow mode. Its score is recorded for the audit trail but
+    # excluded from the flag total (advisory), so it is observed without affecting outcomes.
+    anomaly:
+      enabled: ${FRAUD_RULES_ANOMALY_ENABLED:true}
+      score: ${FRAUD_RULES_ANOMALY_SCORE:25}
+      # Isolation Forest score in (0,1]: ~0.5 normal, >0.6 anomalous.
+      threshold: ${FRAUD_RULES_ANOMALY_THRESHOLD:0.62}
+      zone: ${FRAUD_RULES_ANOMALY_ZONE:Africa/Johannesburg}
+      baseline-window: ${FRAUD_RULES_ANOMALY_BASELINE_WINDOW:7d}
+      velocity-window: ${FRAUD_RULES_ANOMALY_VELOCITY_WINDOW:24h}
+      training:
+        customers: ${FRAUD_RULES_ANOMALY_TRAINING_CUSTOMERS:200}
+        events-per-customer: ${FRAUD_RULES_ANOMALY_TRAINING_EVENTS_PER_CUSTOMER:40}
+        seed: ${FRAUD_RULES_ANOMALY_TRAINING_SEED:42}
+        trees: ${FRAUD_RULES_ANOMALY_TRAINING_TREES:100}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  tracing:
+    # Trace every request/message so each one gets a correlation id in the logs. We're not
+    # exporting spans to a backend, so head sampling is purely about whether an
+    # id is generated; for a fraud audit trail we always want one.
+    sampling:
+      probability: 1.0
