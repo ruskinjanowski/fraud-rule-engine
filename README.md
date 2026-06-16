@@ -192,3 +192,13 @@ the single ingestion path and the query API are both covered.
   emitted as one ECS JSON object per line (`LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs`, set in
   Compose); running from the IDE stays human-readable. No tracing backend is bundled — the
   ids live in the logs.
+
+## Scaling & operations
+
+Throughput characteristics, the partition/concurrency lever, and a reproducible local load
+test are in **[docs/SCALING.md](docs/SCALING.md)** (harness in [`load/`](load)). In short:
+ingestion is synchronous on the consumer thread, so it scales with `min(partitions, listener
+concurrency)`; keying events by `customerId` lets the consumer fan out across partitions while
+keeping each customer's events ordered for the stateful rules. On a laptop, going from 1→6
+partitions/threads took ingestion from ~900 to ~2,440 events/s (~3×). Both knobs are
+env-configurable (`FRAUD_KAFKA_PARTITIONS`, `SPRING_KAFKA_LISTENER_CONCURRENCY`), defaulting to 1.

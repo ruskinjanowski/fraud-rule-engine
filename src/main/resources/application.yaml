@@ -48,6 +48,10 @@ spring:
       # Observe each consumed record so a Kafka-ingested event's logs carry a trace id
       # for end-to-end correlation.
       observation-enabled: true
+      # Consumer threads per listener. Effective parallelism is min(concurrency, partitions);
+      # 1 by default (dev). Raise alongside fraud.kafka.partitions to scale ingestion
+      # (see docs/SCALING.md).
+      concurrency: ${SPRING_KAFKA_LISTENER_CONCURRENCY:1}
 
 # Rule engine tuning (see ADR-0002/ADR-0003, com.capitech.fraud.rule.RuleProperties).
 # An evaluation is flagged once the summed rule score reaches flag-threshold. Each rule
@@ -58,6 +62,10 @@ spring:
 fraud:
   kafka:
     transactions-topic: ${FRAUD_KAFKA_TRANSACTIONS_TOPIC:transactions}
+    # Partition count for the transactions topic = the ingestion-concurrency ceiling
+    # (one partition → at most one consumer thread). 1 by default; raise to parallelise
+    # ingestion (see docs/SCALING.md). Only applied when the topic is first created.
+    partitions: ${FRAUD_KAFKA_PARTITIONS:1}
   rules:
     flag-threshold: ${FRAUD_RULES_FLAG_THRESHOLD:50}
     amount-threshold:

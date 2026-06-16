@@ -33,8 +33,14 @@ import org.springframework.util.backoff.FixedBackOff;
 class KafkaConsumerConfig {
 
 	@Bean
-	NewTopic transactionsTopic(@Value("${fraud.kafka.transactions-topic}") String topic) {
-		return TopicBuilder.name(topic).partitions(1).replicas(1).build();
+	NewTopic transactionsTopic(@Value("${fraud.kafka.transactions-topic}") String topic,
+			@Value("${fraud.kafka.partitions:1}") int partitions) {
+		// Partition count is the ingestion concurrency ceiling: one partition is consumed by
+		// at most one thread, so throughput scales with partitions × listener concurrency.
+		// Defaults to 1 (dev); raise via FRAUD_KAFKA_PARTITIONS in environments that need it
+		// (see docs/SCALING.md). Producers key by customerId, so a customer's events stay on
+		// one partition and the stateful rules still see them in order.
+		return TopicBuilder.name(topic).partitions(partitions).replicas(1).build();
 	}
 
 	@Bean

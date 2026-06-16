@@ -35,4 +35,5 @@ Maven Wrapper is committed (`./mvnw`); no host Maven needed. Host build/test req
 
 - [docs/BRIEF.md](docs/BRIEF.md) — full brief, submission requirements, JD extract (definition of done)
 - [docs/PLAN.md](docs/PLAN.md) — current working plan + feature/idea backlog (provisional, revisited each iteration)
+- [docs/SCALING.md](docs/SCALING.md) — throughput characterisation + the partition/concurrency lever, backed by the load harness in `load/`
 - `docs/adr/` — accepted decisions only

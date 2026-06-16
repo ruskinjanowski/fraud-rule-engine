@@ -87,6 +87,10 @@ services:
       SPRING_DATASOURCE_USERNAME: fraud_app
       SPRING_DATASOURCE_PASSWORD: fraud
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # Ingestion scaling knobs (see docs/SCALING.md). Default to 1/1; override from the shell,
+      # e.g.  FRAUD_KAFKA_PARTITIONS=6 SPRING_KAFKA_LISTENER_CONCURRENCY=6 docker compose up
+      FRAUD_KAFKA_PARTITIONS: ${FRAUD_KAFKA_PARTITIONS:-1}
+      SPRING_KAFKA_LISTENER_CONCURRENCY: ${SPRING_KAFKA_LISTENER_CONCURRENCY:-1}
       # Emit one JSON object per log line (ECS schema), including the traceId/spanId that
       # Micrometer Tracing puts in the MDC, so containerised logs are machine-parseable
       # for aggregation (ADR-0006). Running from the IDE stays human-readable — this is
