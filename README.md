@@ -3,30 +3,23 @@
 Processes categorized transaction events, applies a set of fraud rules to each one,
 flags potential fraud, persists the results, and exposes them via an API.
 
-Built for the Capitec Connect back-end engineering brief — see [docs/BRIEF.md](docs/BRIEF.md)
-for the full brief and [docs/PLAN.md](docs/PLAN.md) for the working plan.
-
-> **Status:** the brief's core is complete. Events are ingested via Kafka (with a
-> dead-letter topic), evaluated against **8 deterministic fraud rules** plus an **advisory
-> ML anomaly scorer** (an Isolation Forest run in shadow mode — see
-> [ADR-0006](docs/adr/0006-ml-anomaly-scorer-in-shadow-mode.md)), stored with a per-rule
-> audit trail, and retrieved by id or via a filtered, paginated query API. Remaining work is
-> hardening and further differentiators (see [docs/PLAN.md](docs/PLAN.md)).
+> Events are ingested via Kafka (with a
+> dead-letter topic), evaluated against 8 deterministic fraud rulesplus an advisory
+> ML anomaly scorer, stored with a per-rule
+> audit trail, and retrieved by id or via a filtered, paginated query API.
 
 ## Tech stack
 
 - Java 25, Spring Boot 4.1
 - PostgreSQL 16 (schema managed by Flyway)
 - Apache Kafka 3.9 (KRaft, single node)
-- [Smile](https://haifengl.github.io/) — pure-JVM Isolation Forest for the advisory ML anomaly rule ([ADR-0006](docs/adr/0006-ml-anomaly-scorer-in-shadow-mode.md))
 - Docker / Docker Compose
 - Testcontainers for integration tests
 
 ## Prerequisites
 
 - Docker (with Compose v2) — the only hard requirement for running the stack.
-- For building or testing on the host without Docker: JDK 25. No local Maven needed —
-  the project ships the Maven Wrapper (`./mvnw`).
+- For building or testing on the host without Docker: JDK 25
 
 ## Run the whole stack (one command)
 
@@ -36,13 +29,6 @@ docker compose up --build
 
 This builds the application image and starts Postgres, Kafka, and the app, in the
 right order (the app waits for Postgres and Kafka to report healthy).
-
-Once it's up:
-
-```bash
-curl http://localhost:8080/actuator/health
-# {"status":"UP", ...}
-```
 
 Tear down (and drop the Postgres volume):
 
@@ -54,8 +40,7 @@ docker compose down -v
 
 A guided walkthrough script covers the whole system: Kafka ingestion,
 the per-rule audit trail, idempotent replay, a poison message landing in the
-dead-letter topic, rules corroborating to cross the flag threshold, the advisory
-ML anomaly scorer firing in shadow mode (without changing the decision), and the
+dead-letter topic, rules corroborating to cross the flag threshold and the
 query API.
 
 ```bash
@@ -70,12 +55,7 @@ demo runs. The core stack doesn't need it; plain `docker compose up` skips it.
 
 ## Ingestion
 
-Ingestion is event-driven and **Kafka-only**: producers publish to the `transactions` topic
-([ADR-0004](docs/adr/0004-kafka-ingestion-adapter.md)). There is no HTTP write path — the REST
-API is retrieval-only. A single ingress keeps the system to one schema, one set of edge
-validation, and one code path; the brief asks for retrieval via an API, not ingestion via one.
-
-The event is persisted, run through the rule set, and the decision stored. `eventId` is the
+Ingestion is event-driven and **Kafka-only**: producers publish to the `transactions` topic. The event is persisted, run through the rule set, and the decision stored. `eventId` is the
 producer-supplied idempotency key, so a replayed event (Kafka delivers at-least-once) returns
 the existing decision instead of re-processing.
 
@@ -164,20 +144,6 @@ The app connects as the least-privilege `fraud_app` role against a dedicated
 `postgres` superuser (password `postgres`) is reserved for admin/maintenance —
 e.g. browsing the data in pgAdmin.
 
-Rule-engine tuning (see [ADR-0002](docs/adr/0002-synchronous-evaluation-pipeline-and-rule-spi.md)):
-
-| Variable                              | Default | Meaning                                            |
-|---------------------------------------|---------|----------------------------------------------------|
-| `FRAUD_RULES_FLAG_THRESHOLD`          | `50`    | Flag the transaction once the summed score reaches this |
-| `FRAUD_RULES_AMOUNT_THRESHOLD_LIMIT`  | `10000` | Amount above which the amount-threshold rule fires |
-| `FRAUD_RULES_AMOUNT_THRESHOLD_SCORE`  | `50`    | Score that rule contributes when it fires          |
-| `FRAUD_RULES_ANOMALY_ENABLED`         | `true`  | Toggle the advisory ML anomaly scorer ([ADR-0006](docs/adr/0006-ml-anomaly-scorer-in-shadow-mode.md)) |
-| `FRAUD_RULES_ANOMALY_THRESHOLD`       | `0.62`  | Isolation Forest score above which `ANOMALY_SCORE` fires (advisory only) |
-
-Every rule has `…_ENABLED` and `…_SCORE` knobs; the full set is in
-[`application.yaml`](src/main/resources/application.yaml). `ANOMALY_SCORE` is **advisory**
-(shadow mode) — its score is recorded for the audit trail but never affects the flag.
-
 ## Observability
 
 Structured logs, trace correlation, and metrics — instrumented once at the service seam so
@@ -195,8 +161,8 @@ the single ingestion path and the query API are both covered.
 
 ## Scaling & operations
 
-Throughput characteristics, the partition/concurrency lever, and a reproducible local load
-test are in **[docs/SCALING.md](docs/SCALING.md)** (harness in [`load/`](load)). In short:
+Throughput characteristics and a local load
+test are in **[docs/SCALING.md](docs/SCALING.md)** . In short:
 ingestion is synchronous on the consumer thread, so it scales with `min(partitions, listener
 concurrency)`; keying events by `customerId` lets the consumer fan out across partitions while
 keeping each customer's events ordered for the stateful rules. On a laptop, going from 1→6

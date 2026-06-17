@@ -2,6 +2,7 @@ package com.capitech.fraud.web;
 
 import com.capitech.fraud.domain.FraudEvaluation;
 import com.capitech.fraud.domain.TransactionCategory;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
@@ -11,6 +12,8 @@ import java.util.UUID;
  * identity and the decision, without the per-rule audit trail. The full trail is the
  * detail view, {@code GET /api/evaluations/{eventId}} ({@link EvaluationResponse}).
  */
+@Schema(description = "A row in the evaluations list: transaction identity plus the decision, "
+		+ "without the per-rule audit trail (see the by-event detail view for that).")
 public record EvaluationSummaryResponse(
 		UUID eventId,
 		String transactionId,

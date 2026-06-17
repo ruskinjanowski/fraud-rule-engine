@@ -124,6 +124,15 @@ fraud:
         seed: ${FRAUD_RULES_ANOMALY_TRAINING_SEED:42}
         trees: ${FRAUD_RULES_ANOMALY_TRAINING_TREES:100}
 
+# OpenAPI / Swagger UI (springdoc). API metadata is set in OpenApiConfig; these are
+# UI niceties: a tidy operations order and the request-duration readout.
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+    display-request-duration: true
+
 management:
   endpoints:
     web:
